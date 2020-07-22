@@ -1,5 +1,7 @@
 import sys 
 import psutil
+import pyqtgraph as pg
+from pyqtgraph import PlotWidget, plot
 from PyQt5.QtGui import QIcon
 from PyQt5 import uic
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
@@ -11,9 +13,12 @@ from PyQt5.QtWidgets import (
     QMessageBox, 
     QProgressBar, 
     QStatusBar,
-    QLCDNumber
+    QLCDNumber,
+    QWidget,
 )
 from time import sleep
+
+from pyqtgraph.functions import Color
 
 class NetworkThread(QThread):
     networkSent = pyqtSignal(int)
@@ -61,7 +66,7 @@ class MemoryThread(QThread):
         while 1:
             memDetail = psutil.virtual_memory()
             self.memoryPercent.emit(memDetail.percent)
-            self.memoryUsed.emit(memDetail.used//self.GB_UNIT)
+            self.memoryUsed.emit(round(memDetail.used/self.GB_UNIT, 1))
             self.memoryTotal.emit(memDetail.total//self.GB_UNIT)
             sleep(1)
 
@@ -90,7 +95,13 @@ class Application(QMainWindow):
         self.width, self.height = 640, 480
         GB_UNIT = 1024*1024*1024
         uic.loadUi('gui.ui', self)
-        
+
+        # List 
+        self.memUsedHistory = [] 
+        self._cpuPList = []   
+
+        # Graph CSS 
+        self.penStyle = pg.mkPen(color=(21, 237, 9), width=2)    
 
         # Set action for Munu
         self.setExitAction()
@@ -98,21 +109,24 @@ class Application(QMainWindow):
 
         # Create Thread for memory data
         self._memP = self.findChild(QProgressBar, 'pBar_PC')
-        self._memGB = self.findChild(QProgressBar, 'pBar_GB')
-        self._memGB.setMaximum(psutil.virtual_memory().total//GB_UNIT)
+        self._memGpV = self.findChild(QWidget, 'memWidget')
         setMemPercent = lambda v : self._memP.setValue(round(v))
-        setMemGB = lambda v : self._memGB.setValue(round(v))
-        
+        self.memGWidget = pg.PlotWidget(self._memGpV)
+        self.memGWidget.setBackground((237, 237, 237))
+        self.memGWidget.resize(621 , 231)
         memTh = MemoryThread()
         memTh.memoryPercent.connect(setMemPercent)
-        memTh.memoryUsed.connect(setMemGB)
+        memTh.memoryUsed.connect(self.setMemGB)
         memTh.start()
 
         # Create Thread for CPU 
         self._cpuP = self.findChild(QProgressBar, 'pBarCPU')
-        setCPUPercent = lambda v : self._cpuP.setValue(round(v))
+        self._gpWidget = self.findChild(QWidget, 'graphWidget')
+        self.graphWidget = pg.PlotWidget(self._gpWidget)
+        self.graphWidget.setBackground((237, 237, 237))
+        self.graphWidget.resize(621, 341)
         cpuTh = CPUThread()
-        cpuTh.CPUPercent.connect(setCPUPercent)
+        cpuTh.CPUPercent.connect(self.setCPUPercent)
         cpuTh.start()
 
         # Create Thread for Disk 
@@ -137,6 +151,29 @@ class Application(QMainWindow):
 
 
         self.setInitUI()
+
+    def setCPUPercent(self, v):
+        self._cpuP.setValue(round(v))
+        self._cpuPList.append(v)
+
+        # filter only lastest 100 data
+        if len(self._cpuPList) > 100:
+            self._cpuPList.pop(0)
+            self.graphWidget.clear()
+
+        self.drawGraph()
+
+    def setMemGB(self, v):
+        self.memUsedHistory.append(v)
+          # filter only lastest 100 data
+        if len(self.memUsedHistory) > 100:
+            self.memUsedHistory.pop(0)
+            self.memGWidget.clear()
+
+        self.memGWidget.plot(self.memUsedHistory, pen=self.penStyle)
+
+    def drawGraph(self):
+        self.graphWidget.plot(self._cpuPList, pen=self.penStyle)
 
     def setInitUI(self):
         self.setWindowTitle(self.title)
